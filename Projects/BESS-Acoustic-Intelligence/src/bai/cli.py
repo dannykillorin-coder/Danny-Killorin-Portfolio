@@ -14,6 +14,8 @@ from bai.config import (
     load_settings,
 )
 from bai.database import Database
+from bai.documents.pipeline import DocumentIntelligence
+from bai.documents.store import DocumentStore
 from bai.models import Settings
 from bai.providers.tavily import TavilyProvider
 
@@ -24,7 +26,7 @@ logger = logging.getLogger("bai")
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="bai",
-        description="Discover and collect publicly accessible BESS acoustic PDFs.",
+        description="Discover, collect, and analyze publicly accessible BESS acoustic PDFs.",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -76,6 +78,33 @@ def build_parser() -> argparse.ArgumentParser:
     import_file.add_argument("path", type=Path)
 
     subparsers.add_parser("stats", help="Show collection and API request statistics")
+
+    parse = subparsers.add_parser(
+        "parse",
+        help="Extract text, candidate tables, and acoustic page signals from collected PDFs",
+    )
+    parse.add_argument("--limit", type=int, help="Maximum documents to process")
+    parse.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Show the number of uncached documents without parsing them",
+    )
+
+    classify = subparsers.add_parser(
+        "classify",
+        help="Classify parsed documents using deterministic evidence",
+    )
+    classify.add_argument("--limit", type=int, help="Maximum documents to classify")
+    classify.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Show the number of unclassified documents",
+    )
+
+    subparsers.add_parser(
+        "intelligence-stats",
+        help="Show PDF processing, classification, and review statistics",
+    )
     return parser
 
 
@@ -104,6 +133,13 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.command == "stats":
             _print_stats(database)
+            return 0
+        if args.command == "parse":
+            return _parse_documents(args, database)
+        if args.command == "classify":
+            return _classify_documents(args, database)
+        if args.command == "intelligence-stats":
+            _print_intelligence_stats(DocumentStore(database))
             return 0
     except (OSError, RuntimeError, ValueError, sqlite3.Error) as exc:
         logger.error("%s", exc)
@@ -192,6 +228,62 @@ def _print_stats(database: Database) -> None:
     print(f"Tracked search API requests: {stats.pop('api_requests')}")
     for status, count in sorted(stats.items()):
         print(f"{status}: {count}")
+
+
+def _parse_documents(args, database: Database) -> int:
+    if args.limit is not None and args.limit < 0:
+        raise ValueError("--limit must be zero or greater")
+    summary = DocumentIntelligence(database).parse_documents(
+        limit=args.limit,
+        dry_run=args.dry_run,
+    )
+    prefix = "Would process" if args.dry_run else "Processed"
+    print(
+        f"{prefix} {summary.processed} document(s); skipped {summary.skipped}; "
+        f"failed {summary.failed}; review required {summary.review_required}; "
+        f"outstanding review items {summary.outstanding_review}."
+    )
+    return 1 if summary.failed and not args.dry_run else 0
+
+
+def _classify_documents(args, database: Database) -> int:
+    if args.limit is not None and args.limit < 0:
+        raise ValueError("--limit must be zero or greater")
+    summary = DocumentIntelligence(database).classify_documents(
+        limit=args.limit,
+        dry_run=args.dry_run,
+    )
+    prefix = "Would classify" if args.dry_run else "Classified"
+    print(
+        f"{prefix} {summary.processed} document(s); skipped {summary.skipped}; "
+        f"review required {summary.review_required}; "
+        f"outstanding review items {summary.outstanding_review}."
+    )
+    return 0
+
+
+def _print_intelligence_stats(store: DocumentStore) -> None:
+    store.initialize()
+    stats = store.statistics()
+    print("Document intelligence:")
+    for label, key in (
+        ("Documents with latest processing results", "latest_processed_documents"),
+        ("Pages in latest results", "latest_parsed_pages"),
+        ("Tables in latest results", "latest_candidate_tables"),
+        ("Successfully extracted tables", "successfully_extracted_tables"),
+        ("Missing-text pages", "missing_text_pages"),
+        ("Parsing failures", "parse_failures"),
+        ("Ambiguous tables", "ambiguous_tables"),
+        ("Tables with unspecified measurement type", "missing_measurement_type_tables"),
+        ("Documents flagged for review", "review_required_documents"),
+        ("Outstanding review items", "outstanding_review_items"),
+        ("Historical processing runs", "processing_runs"),
+        ("Historical extracted pages", "parsed_pages"),
+        ("Historical candidate tables", "candidate_tables"),
+        ("Historical classification records", "classifications"),
+        ("Historical source evidence records", "source_evidence"),
+    ):
+        print(f"{label}: {stats[key]}")
 
 
 def _validate_settings(settings: Settings) -> None:

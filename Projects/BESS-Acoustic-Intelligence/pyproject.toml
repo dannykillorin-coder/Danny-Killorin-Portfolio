@@ -5,10 +5,11 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "bess-acoustic-intelligence"
 version = "0.1.0"
-description = "Phase 1 document discovery and collection for BESS acoustic research"
+description = "Document discovery, collection, and deterministic intelligence for BESS acoustic research"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "pymupdf>=1.23,<2",
     "python-dotenv>=1.0,<2",
     "requests>=2.31,<3",
     "tavily-python>=0.5,<1",

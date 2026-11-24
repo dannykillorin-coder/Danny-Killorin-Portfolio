@@ -66,11 +66,39 @@ Tests use mocked provider responses and local fixtures; they do not call Tavily 
 python -m pytest
 ```
 
+The standard suite skips the regression test that reads private locally downloaded PDFs. To check the five manually inspected source tables without writing extracted content to the database:
+
+```powershell
+$env:BAI_RUN_PDF_INTEGRATION = "1"
+python -m pytest tests/test_local_pdf_integration.py
+Remove-Item Env:BAI_RUN_PDF_INTEGRATION
+```
+
 ## Collection and provenance
 
 The database stores each document's original URL, referring page when available, title, discovery and download timestamps, file size, SHA-256, local path, download status, and duplicate relationship. Search query/provider attribution is stored separately so multiple discovery paths are retained for a URL. Duplicate URLs are collapsed before download; identical PDF contents are detected by hash after transfer.
 
 This is an initial discovery and collection tool, not a guarantee of search completeness or a substitute for checking each source's terms and applicability.
+
+## Phase 2 — Stage A: deterministic document intelligence
+
+Stage A uses PyMuPDF to extract page-numbered text and metadata, identify acoustic-signal pages, and detect candidate tables. PDF text and table extraction are deterministic; no LLM or OCR service is used. Parser version `pymupdf-2` preserves raw cell text and coordinates alongside reconstructed logical cells, row/column spans, multi-row header references, frequency-band mappings, measurement wording, and alignment/review status. Frequency bands are recognized only from header-scoped evidence; numeric measurement cells are not treated as frequencies based on value alone.
+
+Pages with images and little selectable text, pages without extractable text, table-like acoustic passages with no detected table, ambiguous table alignment, unspecified measurement types, and parser errors are retained with warnings and review flags. These statuses mean the content could not be fully assessed by this parser; they do not mean the source document lacks the information. Evidence-based heuristic classification distinguishes BESS acoustic assessments, manufacturer-issued technical documentation, assessments citing manufacturer specifications, academic or industry research, cross-industry acoustic technology, general BESS engineering documentation, and unassessed/irrelevant material. Direct BESS relevance requires focused evidence rather than an isolated mention. Scores are heuristic ranking aids, not calibrated probabilities; source excerpts and review status are retained, and documents are never deleted based on classification.
+
+The intelligence schema is additive and versioned; Stage A.1 extends extracted-table storage while preserving Phase 1 tables and records. A pre-migration SQLite backup is created beside the database as `bai.sqlite3-phase2-v1-backup`; both the database and backup are ignored by Git. Parsing is cached by document ID, recorded SHA-256, and parser version, so unchanged complete or partial parses are skipped. A local file whose hash differs from its Phase 1 record is not parsed and is flagged for review. Repeat parse/classify runs continue to report outstanding review items.
+
+```powershell
+python -m bai parse --dry-run
+python -m bai parse
+python -m bai classify --dry-run
+python -m bai classify
+python -m bai intelligence-stats
+```
+
+`parse` processes downloaded, imported, and duplicate-content PDFs with local paths. `classify` classifies available parsed text and keeps a separate evidence record for each scored category. `intelligence-stats` separates latest-version document/page/table outcomes from cumulative records retained across parser and classifier versions. It reports successful table extraction, missing-text pages, parse failures, ambiguous tables, unspecified measurement types, and outstanding review items. The first intelligence command may initialize the additive schema and create its ignored backup, including when invoked with `--dry-run`.
+
+The equipment, acoustic-measurement, mitigation, and source-evidence tables provide provenance-linked storage foundations for later stages. Stage A leaves equipment/measurement/mitigation records empty; it does not infer values, mix sound power with sound pressure, or calculate combined decibel levels. Pydantic extraction schemas, LLM-assisted extraction, OCR, validation workflows, and structured exports are deferred.
 
 ## Initial live experiment (2026-11-24)
 
