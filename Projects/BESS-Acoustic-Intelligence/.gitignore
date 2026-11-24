@@ -1,0 +1,55 @@
+# Credentials and local settings
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+.secrets/
+secrets/
+*api_key*
+*_credentials.*
+
+# Downloaded documents and private research data
+*.pdf
+data/raw/*
+!data/raw/.gitkeep
+data/processed/*
+!data/processed/.gitkeep
+data/private/
+private_research/
+research_private/
+research_findings/
+private_findings/
+private/
+findings/
+reports/private/
+*.private.*
+
+# Databases and database journals
+*.db
+*.sqlite
+*.sqlite3
+*.sqlite3-*
+*.db-*
+*.duckdb
+*.mdb
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Python caches and generated artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+build/
+dist/
+*.egg-info/
+
+# Logs
+*.log
+*.part
+logs/

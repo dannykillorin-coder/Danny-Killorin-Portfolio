@@ -1,0 +1,48 @@
+# Edit this file to add, remove, or refine discovery queries.
+[[queries]]
+query = "BESS noise impact assessment filetype:pdf"
+region = "global"
+
+[[queries]]
+query = "Battery energy storage acoustic assessment octave band"
+region = "global"
+
+[[queries]]
+query = "BESS inverter acoustic noise"
+region = "global"
+
+[[queries]]
+query = "BESS transformer vibration mitigation"
+region = "global"
+
+[[queries]]
+query = "BESS noise mitigation case study"
+region = "global"
+
+[[queries]]
+query = "Battery energy storage post-construction noise monitoring"
+region = "global"
+
+[[queries]]
+query = "BESS HVAC acoustic silencer"
+region = "global"
+
+[[queries]]
+query = "battery energy storage noise assessment planning application United States"
+region = "United States"
+
+[[queries]]
+query = "battery energy storage acoustic noise planning application United Kingdom"
+region = "United Kingdom"
+
+[[queries]]
+query = "battery energy storage system noise assessment development application Australia"
+region = "Australia"
+
+[[queries]]
+query = "battery energy storage noise impact assessment planning Canada"
+region = "Canada"
+
+[[queries]]
+query = "battery energy storage noise assessment environmental permit continental Europe"
+region = "Continental Europe"
