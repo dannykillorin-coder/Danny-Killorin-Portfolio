@@ -98,7 +98,46 @@ python -m bai intelligence-stats
 
 `parse` processes downloaded, imported, and duplicate-content PDFs with local paths. `classify` classifies available parsed text and keeps a separate evidence record for each scored category. `intelligence-stats` separates latest-version document/page/table outcomes from cumulative records retained across parser and classifier versions. It reports successful table extraction, missing-text pages, parse failures, ambiguous tables, unspecified measurement types, and outstanding review items. The first intelligence command may initialize the additive schema and create its ignored backup, including when invoked with `--dry-run`.
 
-The equipment, acoustic-measurement, mitigation, and source-evidence tables provide provenance-linked storage foundations for later stages. Stage A leaves equipment/measurement/mitigation records empty; it does not infer values, mix sound power with sound pressure, or calculate combined decibel levels. Pydantic extraction schemas, LLM-assisted extraction, OCR, validation workflows, and structured exports are deferred.
+The equipment, acoustic-measurement, mitigation, and source-evidence tables provide provenance-linked storage foundations. Stage A leaves those engineering tables empty; it does not infer values, mix sound power with sound pressure, or calculate combined decibel levels. Stage B1 adds typed Pydantic schemas and an offline candidate-review workflow, described below. LLM-assisted extraction, OCR, and live provider integrations remain deferred.
+
+## Phase 2B — Stage B1: evidence-first schemas and benchmark review
+
+Stage B1 defines typed Pydantic schemas for project facts, equipment, acoustic measurements, mitigation, document provenance, parsed evidence, and manually approved gold records. Unknown values remain null or explicitly unknown. Sound power, sound pressure, SRI, and insertion loss are distinct; reported weighting, frequency bandwidth, measurement basis, facility/per-unit scope, operating conditions, uncertainty, and extraction confidence are represented separately. A value marked eligible for cross-project comparison must meet explicit completeness checks. Extraction confidence is not treated as correctness.
+
+Candidate generation reads only the existing deterministic parsed tables and stored source evidence. It does not open a model connection, make API requests, or incur usage charges. Candidates are stored in the separate, Git-ignored `data/private/benchmarks.sqlite3` database and remain pending until a reviewer acts. The benchmark generator only accepts clear table alignments and unambiguous numeric cells, balances selections across source documents, and preserves each original candidate. The gold-standard set is a separate table containing only manually approved records.
+
+Review a candidate and its source quote/cell coordinates before approving or correcting it:
+
+```powershell
+python -m bai benchmark generate --limit 50
+python -m bai benchmark list --status pending
+python -m bai benchmark show cand-0123456789abcdef
+python -m bai benchmark review cand-0123456789abcdef --action approve --reviewer "Reviewer Name" --reason "Checked against the cited PDF page"
+python -m bai benchmark stats
+python -m bai benchmark export
+```
+
+For a correction, create a local JSON file containing the corrected `measurement` object and `human_review_evidence` list, then pass it with `--action correct --correction-file <path>`. Each evidence item records the document ID, page, table reference, exact quote, and whether it was matched against extracted page text or visually checked in the PDF. Numeric corrections must be supported by that human-reviewed quote; the original deterministic candidate and every correction event remain unchanged in the review history. A later approval promotes the reviewed version to the separate gold set. Rejections are also append-only. `benchmark list`, `show`, and `stats` continue to show existing review items on repeat runs.
+
+Provider-processing eligibility is document-level and default-deny. Inspect or change the audited decision with:
+
+```powershell
+python -m bai provider-eligibility list
+python -m bai provider-eligibility set 17 --allow --reviewer "Reviewer Name" --basis "Explicit authorization verified for this document"
+python -m bai provider-eligibility set 17 --deny --reviewer "Reviewer Name" --basis "Authorization withdrawn"
+```
+
+The eligibility history is in the additive SQLite schema v3 migration. The existing database is backed up and integrity-checked before the migration; Phase 1 and Stage A/A.1 rows are not replaced. There is no provider adapter in B1. Any future external processing must explicitly enforce `DocumentStore.is_provider_processing_eligible`; an absent decision means denied. Candidate/review data and approved gold exports remain under ignored `data/private/`; no research content is intended for Git.
+
+The OpenAI-compatible adapter and its hard request/cost budget enforcement are not implemented in B1. The approved future pilot limits (50 attempts and $1 estimated cost per run) must stop new requests when either is reached. B1 made no provider calls and needs no API credential.
+
+Install the additional schema dependency from the updated project requirements. No API credentials or provider settings are needed for Stage B1. Run the deterministic tests with:
+
+```powershell
+python -m pytest
+```
+
+See [docs/benchmark-review.md](docs/benchmark-review.md) for the correction JSON format, review safeguards, and evidence-validation rules.
 
 ## Initial live experiment (2026-11-24)
 

@@ -353,9 +353,10 @@ def test_additive_schema_backup_preserves_phase1_records(tmp_path):
         "equipment",
         "acoustic_measurements",
         "mitigation_strategies",
+        "provider_processing_eligibility_events",
     }.issubset(table_names)
     with database.connect() as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 2
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 3
         columns = {
             row[1]
             for row in connection.execute("PRAGMA table_info(extracted_tables)")

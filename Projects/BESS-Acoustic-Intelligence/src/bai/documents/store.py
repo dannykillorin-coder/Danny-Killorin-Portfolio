@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
 
 from bai.database import Database
@@ -11,7 +12,7 @@ from bai.documents.models import DocumentClassification, PDFParseResult
 
 
 logger = logging.getLogger(__name__)
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 BACKUP_SUFFIX = "-phase2-v1-backup"
 PROCESSABLE_STATUSES = {"downloaded", "duplicate_content", "imported"}
 
@@ -32,12 +33,15 @@ class DocumentStore:
                     f"version {SCHEMA_VERSION}"
                 )
             if current_version < SCHEMA_VERSION:
+                self._backup_before_b1_migration(connection, path)
                 self._backup_legacy_database(connection, path)
                 if current_version < 1:
                     self._run_migration(connection, _MIGRATION_SQL)
                     current_version = 1
                 if current_version < 2:
                     self._run_migration(connection, _MIGRATION_V2_SQL)
+                if current_version < 3:
+                    self._run_migration(connection, _MIGRATION_V3_SQL)
                 logger.info(
                     "Initialized document intelligence database schema version %s",
                     SCHEMA_VERSION,
@@ -64,6 +68,95 @@ class DocumentStore:
         with sqlite3.connect(backup_path) as backup:
             connection.backup(backup)
         logger.info("Created pre-migration SQLite backup at %s", backup_path)
+
+    @staticmethod
+    def _backup_before_b1_migration(
+        connection: sqlite3.Connection,
+        path: Path,
+    ) -> None:
+        has_documents = connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='documents'"
+        ).fetchone()
+        if not has_documents:
+            return
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+        backup_path = path.with_name(
+            f"{path.name}-phase2b1-{timestamp}-backup"
+        )
+        with sqlite3.connect(backup_path) as backup:
+            connection.backup(backup)
+        with sqlite3.connect(backup_path) as backup:
+            integrity = backup.execute("PRAGMA integrity_check").fetchone()[0]
+            if integrity != "ok":
+                raise RuntimeError(
+                    f"Pre-migration backup failed integrity check: {backup_path}"
+                )
+        logger.info("Created and verified pre-B1 SQLite backup at %s", backup_path)
+
+    def set_provider_eligibility(
+        self,
+        document_id: int,
+        eligible: bool,
+        reviewer: str,
+        authorization_basis: str,
+    ) -> None:
+        if not reviewer.strip():
+            raise ValueError("A reviewer is required to change provider eligibility")
+        if not authorization_basis.strip():
+            raise ValueError("An authorization basis is required to change provider eligibility")
+        with self.database.connect() as connection:
+            exists = connection.execute(
+                "SELECT 1 FROM documents WHERE id = ?", (document_id,)
+            ).fetchone()
+            if exists is None:
+                raise ValueError(f"Unknown document ID {document_id}")
+            connection.execute(
+                """
+                INSERT INTO provider_processing_eligibility_events (
+                    document_id, eligible, reviewer, authorization_basis, recorded_at
+                ) VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    document_id,
+                    int(eligible),
+                    reviewer.strip(),
+                    authorization_basis.strip(),
+                    datetime.now(timezone.utc).isoformat(),
+                ),
+            )
+
+    def provider_eligibility(self) -> list[sqlite3.Row]:
+        with self.database.connect() as connection:
+            return list(
+                connection.execute(
+                    """
+                    SELECT d.id AS document_id, d.title, d.source_url,
+                           COALESCE(e.eligible, 0) AS eligible,
+                           e.reviewer, e.authorization_basis, e.recorded_at
+                    FROM documents AS d
+                    LEFT JOIN provider_processing_eligibility_events AS e
+                      ON e.id = (
+                          SELECT MAX(latest.id)
+                          FROM provider_processing_eligibility_events AS latest
+                          WHERE latest.document_id = d.id
+                      )
+                    ORDER BY d.id
+                    """
+                )
+            )
+
+    def is_provider_processing_eligible(self, document_id: int) -> bool:
+        with self.database.connect() as connection:
+            row = connection.execute(
+                """
+                SELECT eligible
+                FROM provider_processing_eligibility_events
+                WHERE document_id = ?
+                ORDER BY id DESC LIMIT 1
+                """,
+                (document_id,),
+            ).fetchone()
+        return bool(row["eligible"]) if row is not None else False
 
     def processable_documents(self, limit: int | None = None) -> list[sqlite3.Row]:
         documents = [
@@ -697,5 +790,21 @@ ALTER TABLE extracted_tables ADD COLUMN alignment_status TEXT NOT NULL DEFAULT '
 ALTER TABLE extracted_tables ADD COLUMN review_flags_json TEXT NOT NULL DEFAULT '[]';
 CREATE INDEX IF NOT EXISTS idx_tables_alignment ON extracted_tables(alignment_status);
 PRAGMA user_version = 2;
+COMMIT;
+"""
+
+_MIGRATION_V3_SQL = """
+BEGIN IMMEDIATE;
+CREATE TABLE IF NOT EXISTS provider_processing_eligibility_events (
+    id INTEGER PRIMARY KEY,
+    document_id INTEGER NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+    eligible INTEGER NOT NULL CHECK (eligible IN (0, 1)),
+    reviewer TEXT NOT NULL CHECK (length(trim(reviewer)) > 0),
+    authorization_basis TEXT NOT NULL CHECK (length(trim(authorization_basis)) > 0),
+    recorded_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_provider_eligibility_document
+    ON provider_processing_eligibility_events(document_id, id);
+PRAGMA user_version = 3;
 COMMIT;
 """
